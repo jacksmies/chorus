@@ -72,7 +72,8 @@ export default function Groups() {
 
         // Ensure we always return an array, even if the query fails
         const validEvents = Array.isArray(events) ? events : [];
-        
+        console.log("Fetched communities:", validEvents);
+
         // Filter out spam groups
         return filterSpamGroups(validEvents);
       } catch (error) {

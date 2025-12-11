@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,11 +34,21 @@ export function NutzapInterface({ postId, authorPubkey, relayHint, onSuccess }: 
   const { verifyMintCompatibility } = useVerifyMintCompatibility();
   const { showSats } = useCurrencyDisplayStore();
   const { data: btcPrice } = useBitcoinPrice();
-  
+
   const [amount, setAmount] = useState("");
   const [comment, setComment] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [recipientWalletStatus, setRecipientWalletStatus] = useState<'loading' | 'no-wallet' | 'no-compatible-mint' | 'ready'>('loading');
+
+  // Format amount based on user preference and memoize for stability
+  const formatAmount = useCallback((sats: number) => {
+    if (showSats) {
+      return formatBalance(sats);
+    } else if (btcPrice) {
+      return formatUSD(satsToUSD(sats, btcPrice.USD));
+    }
+    return formatBalance(sats);
+  }, [showSats, btcPrice]); // Dependencies ensure the function only changes if preferences or price change
 
   // Check recipient wallet status when component mounts
   useEffect(() => {
@@ -52,13 +62,17 @@ export function NutzapInterface({ postId, authorPubkey, relayHint, onSuccess }: 
     const checkRecipientWallet = async () => {
       try {
         setRecipientWalletStatus('loading');
+        // NOTE: If fetchNutzapInfo is not wrapped in useCallback in its hook,
+        // this entire effect will run on every render, causing the infinite loop.
         const recipientInfo = await fetchNutzapInfo(authorPubkey);
-        
+
         // Check if the effect was cancelled before updating state
         if (cancelled) return;
-        
+
         // Try to verify mint compatibility
         try {
+          // NOTE: If verifyMintCompatibility is not wrapped in useCallback in its hook,
+          // this entire effect will run on every render, causing the infinite loop.
           verifyMintCompatibility(recipientInfo);
           if (!cancelled) {
             setRecipientWalletStatus('ready');
@@ -84,19 +98,10 @@ export function NutzapInterface({ postId, authorPubkey, relayHint, onSuccess }: 
     };
   }, [authorPubkey, user, wallet, cashuStore.activeMintUrl, fetchNutzapInfo, verifyMintCompatibility]);
 
-  // Format amount based on user preference
-  const formatAmount = (sats: number) => {
-    if (showSats) {
-      return formatBalance(sats);
-    } else if (btcPrice) {
-      return formatUSD(satsToUSD(sats, btcPrice.USD));
-    }
-    return formatBalance(sats);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!user) {
       toast.error("You must be logged in to send eCash");
       return;
@@ -125,7 +130,7 @@ export function NutzapInterface({ postId, authorPubkey, relayHint, onSuccess }: 
 
       // Convert amount based on currency preference
       let amountValue: number;
-      
+
       if (showSats) {
         amountValue = parseInt(amount);
       } else {
@@ -163,18 +168,21 @@ export function NutzapInterface({ postId, authorPubkey, relayHint, onSuccess }: 
         relayHint,
       });
 
+      // formatAmount is now stable thanks to useCallback
       toast.success(`Successfully sent ${formatAmount(amountValue)}`);
-      
+
       // Clear form
       setAmount("");
       setComment("");
-      
+
       if (onSuccess) {
         onSuccess();
       }
     } catch (error) {
       console.error("Error sending nutzap:", error);
-      toast.error(error instanceof Error ? error.message : String(error));
+      // Enhanced error handling for toast
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      toast.error(errorMessage);
     } finally {
       setIsProcessing(false);
     }
@@ -261,7 +269,7 @@ export function NutzapInterface({ postId, authorPubkey, relayHint, onSuccess }: 
               />
             </div>
           </div>
-          
+
           <div className="flex gap-2">
             <Button
               type="submit"
